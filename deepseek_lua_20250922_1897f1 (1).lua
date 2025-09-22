@@ -1,0 +1,600 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UIS = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+local LocalPlayer = Players.LocalPlayer
+local CoreGui = game:GetService("CoreGui")
+
+-- Create GUI in CoreGui
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TargetController"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = CoreGui
+
+-- Menu toggle button
+local MenuToggle = Instance.new("TextButton")
+MenuToggle.Size = UDim2.new(0, 55, 0, 55)
+MenuToggle.Position = UDim2.new(0, 15, 0, 15)
+MenuToggle.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+MenuToggle.BackgroundTransparency = 0.3
+MenuToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+MenuToggle.Text = "🗿"
+MenuToggle.Font = Enum.Font.GothamBold
+MenuToggle.TextScaled = true
+MenuToggle.AutoButtonColor = false
+MenuToggle.Parent = ScreenGui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(0, 12)
+toggleCorner.Parent = MenuToggle
+
+-- Menu frame
+local MenuFrame = Instance.new("Frame")
+MenuFrame.Size = UDim2.new(0, 260, 0, 250)
+MenuFrame.Position = UDim2.new(0, 15, 0, 75)
+MenuFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+MenuFrame.BackgroundTransparency = 0.25
+MenuFrame.BorderSizePixel = 0
+MenuFrame.Visible = false
+MenuFrame.Parent = ScreenGui
+
+local menuCorner = Instance.new("UICorner")
+menuCorner.CornerRadius = UDim.new(0, 16)
+menuCorner.Parent = MenuFrame
+
+-- Toggle menu visibility
+MenuToggle.MouseButton1Click:Connect(function()
+MenuFrame.Visible = not MenuFrame.Visible
+end)
+
+-- Make GUI draggable
+local function makeDraggable(guiObject)
+local dragging = false
+local dragStart
+local startPos
+
+guiObject.InputBegan:Connect(function(input)  
+    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then  
+        dragging = true  
+        dragStart = input.Position  
+        startPos = guiObject.Position  
+        input.Changed:Connect(function()  
+            if input.UserInputState == Enum.UserInputState.End then  
+                dragging = false  
+            end  
+        end)  
+    end  
+end)  
+
+guiObject.InputChanged:Connect(function(input)  
+    if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then  
+        local delta = input.Position - dragStart  
+        guiObject.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)  
+    end  
+end)
+
+end
+
+makeDraggable(MenuToggle)
+makeDraggable(MenuFrame)
+
+-- Speed/Range storage
+local SpeedBox = Instance.new("TextBox")
+SpeedBox.Text = "16"
+local RangeBox = Instance.new("TextBox")
+RangeBox.Text = "7"
+local PlayerSpeed = 0.1
+local MaxPlayerSpeed = 3
+
+-- Target detection
+local connections = {}
+local buttonStates = {}
+
+local function getClosestTarget(HumanoidRootPart, targetName)
+local closest
+local shortestDistance = math.huge
+for _, obj in ipairs(workspace:GetDescendants()) do
+if obj:IsA("Model") and obj.Name == targetName then
+local pivot = obj:GetPivot().Position
+local distance = (HumanoidRootPart.Position - pivot).Magnitude
+if distance < shortestDistance then
+shortestDistance = distance
+closest = obj
+end
+end
+end
+return closest
+end
+
+local function moveToTarget(targetName, toggleButton)
+local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+local target = getClosestTarget(HumanoidRootPart, targetName)
+if not target then return end
+
+local targetPos = target:GetPivot().Position  
+local speed = tonumber(SpeedBox.Text) or 25.5  
+local reachDistance = tonumber(RangeBox.Text) or 5  
+local reached = false  
+
+connections[targetName] = RunService.Heartbeat:Connect(function(deltaTime)  
+    if reached or not Character.Parent or toggleButton.Text:find("OFF") then  
+        if connections[targetName] then  
+            connections[targetName]:Disconnect()  
+            connections[targetName] = nil  
+        end  
+        return  
+    end  
+
+    local direction = (targetPos - HumanoidRootPart.Position)  
+    local distance = direction.Magnitude  
+
+    if distance < reachDistance then  
+        reached = true  
+        return  
+    end  
+
+    HumanoidRootPart.CFrame = HumanoidRootPart.CFrame + direction.Unit * speed * deltaTime  
+end)
+
+end
+
+-- OPTİMİZE AURA SİSTEMİ
+local auraEnabled = false
+local auraConnection
+local auraTargetNames = {"Tin Node","Copper Node","Stone Node","Marble Node","Iron Node","Tree","Cow","Sheep"}
+local auraDetectionRadius = 10
+local auraDetectionRadiusSq = auraDetectionRadius * auraDetectionRadius
+
+-- Önbellek sistemi
+local cachedTargets = {}
+local lastCacheUpdate = 0
+local cacheUpdateInterval = 2 -- 2 saniyede bir cache güncelle
+
+local function updateTargetCache()
+    cachedTargets = {}
+    
+    -- Modelleri önbelleğe al
+    for _, name in ipairs(auraTargetNames) do
+        cachedTargets[name] = {}
+        local models = Workspace:FindFirstChild(name)
+        if models then
+            for _, model in ipairs(models:GetDescendants()) do
+                if model:IsA("Model") and model.Name == name then
+                    table.insert(cachedTargets[name], model)
+                end
+            end
+        end
+    end
+    
+    lastCacheUpdate = tick()
+end
+
+-- Optimize aura fonksiyonu
+local function startAura()
+    if auraConnection then return end
+    
+    -- İlk cache güncelleme
+    updateTargetCache()
+    
+    local lastActivation = 0
+    local activationCooldown = 0.2 -- Saniyede 5 aktivasyon (FPS dostu)
+    
+    auraConnection = RunService.Heartbeat:Connect(function()
+        if not auraEnabled then return end
+        
+        local Character = LocalPlayer.Character
+        if not Character then return end
+        
+        local HumanoidRootPart = Character:FindFirstChild("HumanoidRootPart")
+        local currentTool = Character:FindFirstChildOfClass("Tool")
+        
+        if not HumanoidRootPart or not currentTool then return end
+
+        -- Cache'i periyodik olarak güncelle
+        if tick() - lastCacheUpdate > cacheUpdateInterval then
+            updateTargetCache()
+        end
+
+        local charPos = HumanoidRootPart.Position  
+        local currentTime = tick()
+        
+        -- Cooldown kontrolü
+        if currentTime - lastActivation < activationCooldown then
+            return
+        end
+
+        local shouldActivate = false
+
+        -- Oyuncular (daha optimize)
+        for _, player in pairs(Players:GetPlayers()) do  
+            if player ~= LocalPlayer and player.Character then  
+                local humanoidRoot = player.Character:FindFirstChild("HumanoidRootPart")
+                if humanoidRoot then
+                    local distanceSq = (charPos - humanoidRoot.Position).Magnitude^2  
+                    if distanceSq <= auraDetectionRadiusSq then  
+                        shouldActivate = true
+                        break
+                    end
+                end
+            end  
+        end
+
+        -- Önbelleklenmiş modeller
+        if not shouldActivate then
+            for name, models in pairs(cachedTargets) do
+                for _, model in ipairs(models) do
+                    if model and model.Parent then
+                        local pos = model:GetPivot().Position
+                        local distanceSq = (charPos - pos).Magnitude^2
+                        if distanceSq <= auraDetectionRadiusSq then
+                            shouldActivate = true
+                            break
+                        end
+                    end
+                end
+                if shouldActivate then break end
+            end
+        end
+
+        if shouldActivate then
+            currentTool:Activate()
+            lastActivation = currentTime
+        end
+    end)
+end
+
+local function stopAura()
+    if auraConnection then
+        auraConnection:Disconnect()
+        auraConnection = nil
+    end
+end
+
+-- Categories
+local categories = {
+    ["Node"] = {"Tin Node", "Copper Node", "Stone Node", "Marble Node", "Iron Node"},
+    ["TownHall"] = {"TownHall1", "TownHall2", "TownHall3", "Blacksmith Shop"},
+    ["Food/Plants"] = {"Prickly Pear", "Fiber Plant", "Apple", "Corn Plant", "Tree"},
+    ["Animals"] = {"Cow", "Sheep"},
+    ["Target Speed"] = {"Speed"},
+    ["Range"] = {"Range"},
+    ["Player Speed"] = {"Player Speed"},
+    ["Aura"] = {"Aura Toggle", "Aura Radius"}
+}
+
+-- Scrollable content
+local ContentFrame = Instance.new("ScrollingFrame")
+ContentFrame.BackgroundTransparency = 1
+ContentFrame.ScrollBarThickness = 6
+ContentFrame.Position = UDim2.new(0, 10, 0, 50)
+ContentFrame.Size = UDim2.new(1, -20, 1, -60)
+ContentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+ContentFrame.ScrollBarImageColor3 = Color3.fromRGB(255,255,255)
+ContentFrame.ScrollBarImageTransparency = 0.3
+ContentFrame.Parent = MenuFrame
+
+-- Show category buttons
+local function showCategory(catName)
+ContentFrame:ClearAllChildren()
+local startY = 0
+for i, name in ipairs(categories[catName]) do
+local isOn = buttonStates[catName] and buttonStates[catName][name] or false
+
+if name == "Aura Toggle" then
+    local btn = Instance.new("TextButton")  
+    btn.Size = UDim2.new(0, 220, 0, 45)  
+    btn.Position = UDim2.new(0, 0, 0, startY)  
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)  
+    btn.TextColor3 = Color3.fromRGB(255,255,255)  
+    btn.Text = "Aura "..(auraEnabled and "ON" or "OFF")  
+    btn.Font = Enum.Font.SourceSansBold  
+    btn.TextScaled = true  
+    btn.Parent = ContentFrame  
+
+    local btnCorner = Instance.new("UICorner")  
+    btnCorner.CornerRadius = UDim.new(0,12)  
+    btnCorner.Parent = btn  
+
+    btn.MouseButton1Click:Connect(function()  
+        auraEnabled = not auraEnabled
+        btn.Text = "Aura "..(auraEnabled and "ON" or "OFF")  
+        
+        if auraEnabled then
+            startAura()
+        else
+            stopAura()
+        end
+    end)  
+
+    startY = startY + 50
+
+elseif name == "Aura Radius" then
+    local radiusLabel = Instance.new("TextLabel")  
+    radiusLabel.Size = UDim2.new(0, 60, 0, 25)  
+    radiusLabel.Position = UDim2.new(0, 0, 0, startY)  
+    radiusLabel.BackgroundTransparency = 1  
+    radiusLabel.TextColor3 = Color3.fromRGB(255,255,255)  
+    radiusLabel.Text = tostring(auraDetectionRadius)  
+    radiusLabel.Font = Enum.Font.SourceSansBold  
+    radiusLabel.TextScaled = true  
+    radiusLabel.Parent = ContentFrame  
+
+    local sliderBar = Instance.new("Frame")  
+    sliderBar.Size = UDim2.new(0,220,0,20)  
+    sliderBar.Position = UDim2.new(0,0,0,startY+30)  
+    sliderBar.BackgroundColor3 = Color3.fromRGB(70,70,70)  
+    sliderBar.Parent = ContentFrame  
+
+    local sliderFill = Instance.new("Frame")  
+    sliderFill.Size = UDim2.new(auraDetectionRadius/50,0,1,0)  
+    sliderFill.BackgroundColor3 = Color3.fromRGB(0,200,255)  
+    sliderFill.Parent = sliderBar  
+
+    local sliderButton = Instance.new("TextButton")  
+    sliderButton.Size = UDim2.new(0,20,1,0)  
+    sliderButton.Position = UDim2.new(sliderFill.Size.X.Scale,0,0,0)  
+    sliderButton.BackgroundColor3 = Color3.fromRGB(255,255,255)  
+    sliderButton.Text = ""  
+    sliderButton.Parent = sliderBar  
+
+    local dragging = false  
+    sliderButton.MouseButton1Down:Connect(function() dragging = true end)  
+    UIS.InputEnded:Connect(function(input)  
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then  
+            dragging = false  
+        end  
+    end)  
+    UIS.InputChanged:Connect(function(input)  
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then  
+            local relativeX = math.clamp(input.Position.X - sliderBar.AbsolutePosition.X,0,sliderBar.AbsoluteSize.X)  
+            local ratio = relativeX/sliderBar.AbsoluteSize.X  
+            auraDetectionRadius = math.floor(ratio * 50)  
+            auraDetectionRadiusSq = auraDetectionRadius * auraDetectionRadius
+            sliderFill.Size = UDim2.new(ratio,0,1,0)  
+            sliderButton.Position = UDim2.new(ratio,0,0,0)  
+            radiusLabel.Text = tostring(auraDetectionRadius)  
+        end  
+    end)  
+
+    startY = startY + 55
+
+-- Diğer kategoriler aynı kalıyor...
+elseif name == "Speed" then  
+    local speedLabel = Instance.new("TextLabel")  
+    speedLabel.Size = UDim2.new(0, 60, 0, 25)  
+    speedLabel.Position = UDim2.new(0, 0, 0, startY)  
+    speedLabel.BackgroundTransparency = 1  
+    speedLabel.TextColor3 = Color3.fromRGB(255,255,255)  
+    speedLabel.Text = SpeedBox.Text  
+    speedLabel.Font = Enum.Font.SourceSansBold  
+    speedLabel.TextScaled = true  
+    speedLabel.Parent = ContentFrame  
+
+    local sliderBar = Instance.new("Frame")  
+    sliderBar.Size = UDim2.new(0,220,0,20)  
+    sliderBar.Position = UDim2.new(0,0,0,startY+30)  
+    sliderBar.BackgroundColor3 = Color3.fromRGB(70,70,70)  
+    sliderBar.Parent = ContentFrame  
+
+    local sliderFill = Instance.new("Frame")  
+    sliderFill.Size = UDim2.new(tonumber(SpeedBox.Text)/100,0,1,0)  
+    sliderFill.BackgroundColor3 = Color3.fromRGB(0,255,0)  
+    sliderFill.Parent = sliderBar  
+
+    local sliderButton = Instance.new("TextButton")  
+    sliderButton.Size = UDim2.new(0,20,1,0)  
+    sliderButton.Position = UDim2.new(sliderFill.Size.X.Scale,0,0,0)  
+    sliderButton.BackgroundColor3 = Color3.fromRGB(255,255,255)  
+    sliderButton.Text = ""  
+    sliderButton.Parent = sliderBar  
+
+    local dragging = false  
+    sliderButton.MouseButton1Down:Connect(function() dragging = true end)  
+    UIS.InputEnded:Connect(function(input)  
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then  
+            dragging = false  
+        end  
+    end)  
+    UIS.InputChanged:Connect(function(input)  
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then  
+            local relativeX = math.clamp(input.Position.X - sliderBar.AbsolutePosition.X,0,sliderBar.AbsoluteSize.X)  
+            local ratio = relativeX/sliderBar.AbsoluteSize.X  
+            local speedValue = math.floor(ratio * 100)  
+            SpeedBox.Text = tostring(speedValue)  
+            sliderFill.Size = UDim2.new(ratio,0,1,0)  
+            sliderButton.Position = UDim2.new(ratio,0,0,0)  
+            speedLabel.Text = tostring(speedValue)  
+        end  
+    end)  
+
+    startY = startY + 55  
+
+elseif name == "Range" then  
+    local rangeInput = Instance.new("TextBox")  
+    rangeInput.Size = UDim2.new(0, 220, 0, 45)  
+    rangeInput.Position = UDim2.new(0, 20, 0, startY)  
+    rangeInput.BackgroundColor3 = Color3.fromRGB(40, 40, 40)  
+    rangeInput.BackgroundTransparency = 0.2  
+    rangeInput.TextColor3 = Color3.fromRGB(255, 255, 255)  
+    rangeInput.PlaceholderText = "Distance"  
+    rangeInput.Text = RangeBox.Text  
+    rangeInput.Font = Enum.Font.SourceSansBold  
+    rangeInput.TextScaled = true  
+    rangeInput.ClearTextOnFocus = false  
+    rangeInput.Parent = ContentFrame  
+
+    local rangeCorner = Instance.new("UICorner")  
+    rangeCorner.CornerRadius = UDim.new(0, 12)  
+    rangeCorner.Parent = rangeInput  
+
+    rangeInput:GetPropertyChangedSignal("Text"):Connect(function()  
+        RangeBox.Text = rangeInput.Text  
+    end)  
+
+    startY = startY + 55  
+
+elseif name == "Player Speed" then  
+    local speedLabel = Instance.new("TextLabel")  
+    speedLabel.Size = UDim2.new(0, 60, 0, 25)  
+    speedLabel.Position = UDim2.new(0, 0, 0, startY)  
+    speedLabel.BackgroundTransparency = 1  
+    speedLabel.TextColor3 = Color3.fromRGB(255,255,255)  
+    speedLabel.Text = tostring(PlayerSpeed)  
+    speedLabel.Font = Enum.Font.SourceSansBold  
+    speedLabel.TextScaled = true  
+    speedLabel.Parent = ContentFrame  
+
+    local sliderBar = Instance.new("Frame")  
+    sliderBar.Size = UDim2.new(0,220,0,20)  
+    sliderBar.Position = UDim2.new(0,0,0,startY+30)  
+    sliderBar.BackgroundColor3 = Color3.fromRGB(70,70,70)  
+    sliderBar.Parent = ContentFrame  
+
+    local sliderFill = Instance.new("Frame")  
+    sliderFill.Size = UDim2.new(PlayerSpeed/MaxPlayerSpeed,0,1,0)  
+    sliderFill.BackgroundColor3 = Color3.fromRGB(0,255,0)  
+    sliderFill.Parent = sliderBar  
+
+    local sliderButton = Instance.new("TextButton")  
+    sliderButton.Size = UDim2.new(0,20,1,0)  
+    sliderButton.Position = UDim2.new(sliderFill.Size.X.Scale,0,0,0)  
+    sliderButton.BackgroundColor3 = Color3.fromRGB(255,255,255)  
+    sliderButton.Text = ""  
+    sliderButton.Parent = sliderBar  
+
+    local dragging = false  
+    sliderButton.MouseButton1Down:Connect(function() dragging = true end)  
+    UIS.InputEnded:Connect(function(input)  
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then  
+            dragging = false  
+        end  
+    end)  
+    UIS.InputChanged:Connect(function(input)  
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then  
+            local relativeX = math.clamp(input.Position.X - sliderBar.AbsolutePosition.X,0,sliderBar.AbsoluteSize.X)  
+            local ratio = relativeX/sliderBar.AbsoluteSize.X  
+            PlayerSpeed = math.floor(ratio * MaxPlayerSpeed * 10)/10  
+            sliderFill.Size = UDim2.new(ratio,0,1,0)  
+            sliderButton.Position = UDim2.new(ratio,0,0,0)  
+            speedLabel.Text = tostring(PlayerSpeed)  
+        end  
+    end)  
+
+    local btn = Instance.new("TextButton")  
+    btn.Size = UDim2.new(0, 220, 0, 35)  
+    btn.Position = UDim2.new(0,0,0,startY+60)  
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)  
+    btn.TextColor3 = Color3.fromRGB(255,255,255)  
+    btn.Text = "Player Speed "..(isOn and "ON" or "OFF")  
+    btn.Font = Enum.Font.SourceSansBold  
+    btn.TextScaled = true  
+    btn.Parent = ContentFrame  
+
+    local btnCorner = Instance.new("UICorner")  
+    btnCorner.CornerRadius = UDim.new(0,12)  
+    btnCorner.Parent = btn  
+
+    if not buttonStates[catName] then buttonStates[catName] = {} end  
+    buttonStates[catName][name] = isOn  
+
+    btn.MouseButton1Click:Connect(function()  
+        buttonStates[catName][name] = not buttonStates[catName][name]  
+        btn.Text = "Player Speed "..(buttonStates[catName][name] and "ON" or "OFF")  
+    end)  
+
+    RunService.RenderStepped:Connect(function()  
+        if buttonStates[catName][name] then  
+            local playerChar = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()  
+            local root = playerChar:WaitForChild("HumanoidRootPart")  
+            local humanoid = playerChar:WaitForChild("Humanoid")  
+            local moveDir = humanoid.MoveDirection  
+            if moveDir.Magnitude > 0 then  
+                root.CFrame = root.CFrame + moveDir.Unit * (PlayerSpeed * 0.1)  
+            end  
+        end  
+    end)  
+
+    startY = startY + 105  
+
+else  
+    local btn = Instance.new("TextButton")  
+    btn.Size = UDim2.new(0, 220, 0, 45)  
+    btn.Position = UDim2.new(0, 0, 0, startY)  
+    btn.BackgroundColor3 = Color3.fromRGB(35,35,35)  
+    btn.TextColor3 = Color3.fromRGB(255,255,255)  
+    btn.Text = name.." "..(isOn and "ON" or "OFF")  
+    btn.Font = Enum.Font.SourceSansBold  
+    btn.TextScaled = true  
+    btn.Parent = ContentFrame  
+
+    local btnCorner = Instance.new("UICorner")  
+    btnCorner.CornerRadius = UDim.new(0,12)  
+    btnCorner.Parent = btn  
+
+    if not buttonStates[catName] then buttonStates[catName] = {} end  
+    buttonStates[catName][name] = isOn  
+
+    btn.MouseButton1Click:Connect(function()  
+        local state = not buttonStates[catName][name]  
+        buttonStates[catName][name] = state  
+        btn.Text = name.." "..(state and "ON" or "OFF")  
+
+        if state then  
+            moveToTarget(name, btn)  
+        else  
+            if connections[name] then  
+                connections[name]:Disconnect()  
+                connections[name] = nil  
+            end  
+        end  
+    end)  
+
+    startY = startY + 50  
+end  
+end  
+ContentFrame.CanvasSize = UDim2.new(0,0,0,startY)
+
+end
+
+-- Category tabs
+local categoriesList = {"Node", "TownHall", "Food/Plants", "Animals", "Target Speed", "Range", "Player Speed", "Aura"}
+local menuWidth = MenuFrame.Size.X.Offset
+local padding = 5
+local buttonHeight = 35
+local buttonWidth = (menuWidth - (padding * (#categoriesList+1))) / #categoriesList
+
+local TabsScrollingFrame = Instance.new("ScrollingFrame")
+TabsScrollingFrame.Size = UDim2.new(1, -20, 0, buttonHeight + 10)
+TabsScrollingFrame.Position = UDim2.new(0, 10, 0, 10)
+TabsScrollingFrame.BackgroundTransparency = 1
+TabsScrollingFrame.ScrollBarThickness = 6
+TabsScrollingFrame.CanvasSize = UDim2.new(0, (#categoriesList)*(buttonWidth + padding) + padding, 0, buttonHeight)
+TabsScrollingFrame.Parent = MenuFrame
+
+local startX = padding
+for _, catName in ipairs(categoriesList) do
+local tabBtn = Instance.new("TextButton")
+tabBtn.Size = UDim2.new(0, buttonWidth, 0, buttonHeight)
+tabBtn.Position = UDim2.new(0, startX, 0, 0)
+tabBtn.BackgroundColor3 = Color3.fromRGB(50,50,50)
+tabBtn.TextColor3 = Color3.fromRGB(255,255,255)
+tabBtn.Text = catName
+tabBtn.Font = Enum.Font.SourceSansBold
+tabBtn.TextScaled = true
+tabBtn.Parent = TabsScrollingFrame
+
+local tabCorner = Instance.new("UICorner")  
+tabCorner.CornerRadius = UDim.new(0,8)  
+tabCorner.Parent = tabBtn  
+
+tabBtn.MouseButton1Click:Connect(function()  
+    showCategory(catName)  
+end)  
+
+startX = startX + buttonWidth + padding
+
+end
+
+-- Show first category by default
+showCategory(categoriesList[1])
