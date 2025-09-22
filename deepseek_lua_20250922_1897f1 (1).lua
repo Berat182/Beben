@@ -178,7 +178,7 @@ local function startAura()
     updateTargetCache()
     
     local lastActivation = 0
-    local activationCooldown = 0.2 -- Saniyede 5 aktivasyon (FPS dostu)
+    local activationCooldown = 0.1 -- Saniyede 5 aktivasyon (FPS dostu)
     
     auraConnection = RunService.Heartbeat:Connect(function()
         if not auraEnabled then return end
