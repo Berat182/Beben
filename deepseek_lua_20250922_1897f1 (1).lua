@@ -474,7 +474,7 @@ elseif name == "Player Speed" then
         if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then  
             local relativeX = math.clamp(input.Position.X - sliderBar.AbsolutePosition.X,0,sliderBar.AbsoluteSize.X)  
             local ratio = relativeX/sliderBar.AbsoluteSize.X  
-            PlayerSpeed = math.floor(ratio * MaxPlayerSpeed * 10)/10  
+            PlayerSpeed = math.floor(ratio * MaxPlayerSpeed * 5)/5  
             sliderFill.Size = UDim2.new(ratio,0,1,0)  
             sliderButton.Position = UDim2.new(ratio,0,0,0)  
             speedLabel.Text = tostring(PlayerSpeed)  
